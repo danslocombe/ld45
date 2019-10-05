@@ -8,133 +8,337 @@ right=2
 up=3
 down=4
 
-maps = {
+flags_border_none   = 0
+flags_border_left   = 0x01
+flags_border_right  = 0x02
+flags_border_top    = 0x04
+flags_border_bottom = 0x08
+flags_border_all = bor(flags_border_left, bor(flags_border_right, bor(flags_border_top, flags_border_bottom)))
+
+-- tile chars:
+-- l / r / t / b for single
+-- 0 / 1 / 2 / 3 for corner peice rotated 90deg resp
+tiles = {
 [[
-.......
-.     .
-.p   t.
-.......
+..........
+.    r   .
+.  3     .
+.        .
+. 0      .
+.b     1 .
+.        .
+.     2  .
+.   3   1.
+..........
 ]],
 } 
 
-function load_map(map)
-  local px = 0
-  local py = 0
-  blocks = {}
-
-  lines = split_lines(map)
-  player = create_player(px, py)
-  blocks = {}
-  drawables = {}
-
-  map_width = 1
-  for i = 1,#lines do
-    map_width = max(w,#lines[i])
-  end
-  map_height = #lines
-
-  local xoffset = 7 - map_width / 2
-  local yoffset = 7 - map_height / 2
-
-  for y,l in pairs(lines) do
-    for x=1,#l do
-      local xx = (x + xoffset) * 8
-      local yy = (y + yoffset) * 8
-      local ss = sub(l,x,x)
-
-      if ss == "." then
-        local block = create_block(xx, yy)
-        add(blocks, block)
-        add(drawables, block)
-      elseif ss == "p" then
-        player.x = xx
-        player.y = yy
-      end
-    end
-  end
-end
-
 function _init()
-  load_map(maps[1])
+  reset()
+  load_tile(0, 0, tiles[1])
+  local target_robot = 1 + flr(rnd(3))
+  generate_target(target_robot)
+
+  t = 0
+  selected_robot_id = 1
 end
 
 function _update60()
-  player.tick(player)
-  for i,b in pairs(blocks) do
-    b.tick(b)
+  --if t % 4 == 0 then
+    --printh(stat(7))
+  --end
+
+  local ndir = none
+  if btnp(0) then
+    ndir = left
+  elseif btnp(1) then
+    ndir = right
+  elseif btnp(2) then
+    ndir = up
+  elseif btnp(3) then
+    ndir = down
+  elseif btnp(4) then
+    selected_robot_id = 1 + ((selected_robot_id - 2) % #cur_state.robots)
+    printh("selecting " .. selected_robot_id)
+  elseif btnp(5) then
+    selected_robot_id = 1 + ((selected_robot_id) % #cur_state.robots)
+    printh("selecting " .. selected_robot_id)
+  end
+
+  if ndir != none then
+    cur_state = move_robot(ndir, selected_robot_id, cur_state)
   end
 end
 
-function _draw()
-  cls(0)
-  for i,b in pairs(drawables) do
-    b.draw(b)
-  end
-
-  player.draw(player)
-end
-
-function create_player()
-  local obj = {
-    x = 2,
-    y = 2,
-    speed = 2,
-    dir = none,
-    tx = 0,
-    ty = 0,
+function reset()
+  printh("resetting..")
+  grid = {}
+  drawables = {}
+  cur_state = {
+    t = 0,
+    robots = {
+      create_robot(2, 2, 1, 14),
+      create_robot(5, 5, 2, 12),
+      create_robot(6, 8, 3, 11),
+    },
   }
 
-  obj.tick = function(o)
-    if obj.dir == none then
-      if btnp(0) then
-        obj.dir = left
-      elseif btnp(1) then
-        obj.dir = right
-      elseif btnp(2) then
-        obj.dir = up
-      elseif btnp(3) then
-        obj.dir = down
-      end
-    else
-      local mov_x = 0
-      local mov_y = 0
-      if obj.dir == left then
-        mov_x -= 1
-      elseif obj.dir == right then
-        mov_x += 1
-      elseif obj.dir == up then
-        mov_y -= 1
-      elseif obj.dir == down then
-        mov_y += 1
+  target_x = 1
+  target_y = 1
+  target_id = 1
+end 
+
+function create_robot(x, y, id, col)
+  return {x = x, y = y, id = id, col = col}
+end
+
+function clone_robot(r)
+  -- robot should be immutable, clone on changes
+  return {x = r.x, y = r.y, id = r.id, col = r.col}
+end
+
+function load_tile(xoffset, yoffset, tile)
+  local px = 0
+  local py = 0
+
+  lines = split_lines(tile)
+  for y,l in pairs(lines) do
+    for x=1,#l do
+      local ss = sub(l,x,x)
+      local borders = flags_border_none
+
+      if ss == "." then
+        borders = flags_border_all
+      elseif ss == "l" then
+        borders = flags_border_left
+      elseif ss == "r" then
+        borders = flags_border_right
+      elseif ss == "t" then
+        borders = flags_border_top
+      elseif ss == "b" then
+        borders = flags_border_bottom
+      elseif ss == "0" then
+        borders = bor(flags_borders_bottom, flags_border_left)
+      elseif ss == "1" then
+        borders = bor(flags_border_top, flags_border_left)
+      elseif ss == "2" then
+        borders = bor(flags_border_top, flags_border_right)
+      elseif ss == "3" then
+        borders = bor(flags_border_right, flags_border_bottom)
       end
 
-      --obj.x = obj.x + mov_x * obj.speed
-      --obj.y = obj.y + mov_y * obj.speed
+      if (borders != flags_border_none) then
+        local cell = {x = x - 1, y = y - 1, borders = borders}
+        add(grid, cell)
+      end
+    end
+  end
+end
+
+function generate_target(target_robot)
+  local state = cur_state
+  for i = 0,200 do
+    local dir = 1 + flr(rnd(4))
+    local id = 1 + flr(rnd(#cur_state.robots))
+    state = move_robot(dir, id, state)
+  end
+
+  target_x = state.robots[target_robot].x
+  target_y = state.robots[target_robot].y
+  target_id = target_robot
+end
+
+function place_free(x, y, state)
+  for i,o in pairs(state.robots) do
+    if o.x == x and o.y == y then
+      return false
     end
   end
 
-  obj.draw = function(o)
-    rectfill(o.x, o.y, o.x + 7, o.y + 7, 8)
-  end
-
-  return obj
+  return true
 end
 
-function create_block(x, y)
-  local obj = {
-    x = x,
-    y = y,
+function should_stop(x, y, dir, state)
+  for i,cell in pairs(grid) do
+    if cell.x == x and cell.y == y then
+      if (dir == up and (band(cell.borders, flags_border_top) != 0))
+        or (dir == left and (band(cell.borders, flags_border_left) != 0))
+        or (dir == right and (band(cell.borders, flags_border_right) != 0))
+        or (dir == down and (band(cell.borders, flags_border_bottom) != 0)) then
+        return true
+      end
+    elseif (cell.x == x and cell.y == y+1) then
+      -- above
+      if dir == down and band(cell.borders, flags_border_top) != 0 then
+        return true
+      end
+    elseif (cell.x == x and cell.y == y-1) then
+      -- below
+      if dir == up and band(cell.borders, flags_border_bottom) != 0 then
+        return true
+      end
+    elseif (cell.x == x-1 and cell.y == y) then
+      -- to right
+      if dir == left and band(cell.borders, flags_border_right) != 0 then
+        return true
+      end
+    elseif (cell.x == x+1 and cell.y == y) then
+      -- to left
+      if dir == right and band(cell.borders, flags_border_left) != 0 then
+        return true
+      end
+    end
+  end
+
+  return false
+end
+
+-- draw --
+
+function _draw()
+  cls(13)
+
+  local scale = 8
+  local x0 = 3
+  local y0 = 3
+
+  local bgsize = 10
+  for i = 0,10 do
+    local bgcol = 2
+    line((x0 + i) * scale, y0 * scale, (x0 + i) * scale, (y0 + bgsize) * scale, bgcol)
+    line(x0 * scale, (y0 + i) * scale, (x0 + bgsize) * scale, (y0 + i) * scale, bgcol)
+  end
+
+  for i,cell in pairs(grid) do
+    draw_cell(x0, y0, scale, cell)
+  end
+
+  for i,b in pairs(drawables) do
+    b.draw()
+  end
+
+  draw_state(x0, y0, scale, cur_state)
+
+  t = t + 1
+  circ(12 + 8 * sin(t / 100), 12, 4, 7)
+
+end
+
+function move_robot(dir, id, state)
+  --local pos_clear = 
+
+  local player = state.robots[id]
+  for i,r in pairs(state.robots) do
+    if r.id == id then
+      new_robot = clone_robot(r)
+      break
+    end
+  end
+
+  local mx = 0
+  local my = 0
+  if dir == left then
+    mx = -1
+  elseif dir == right then
+    mx = 1
+  elseif dir == down then
+    my = 1
+  elseif dir == up then
+    my = -1
+  end
+
+  while (not should_stop(new_robot.x, new_robot.y, dir, state)) 
+    and (place_free(new_robot.x + mx, new_robot.y + my, state)) do
+    new_robot.x = new_robot.x + mx
+    new_robot.y = new_robot.y + my
+  end
+
+  local new_state = {
+    t = state.t + 1,
+    robots = {
+      new_robot,
+    },
   }
 
-  obj.tick = function(o)
+  -- copy over non-moving robots into new state
+  -- as robots are immutable we can reference old
+  for i,r in pairs(state.robots) do
+    if r.id != id then
+      add(new_state.robots, r)
+    end
   end
 
-  obj.draw = function(o)
-    rectfill(o.x, o.y, o.x + 7, o.y + 7, 2)
-  end
-
-  return obj
+  return new_state
 end
+
+function draw_state(xoffset, yoffset, scale, state)
+  draw_target(xoffset, yoffset, scale, cur_state)
+  for i,r in pairs(state.robots) do
+    local x0 = (r.x + xoffset + 0.25) * scale
+    local y0 = (r.y + yoffset + 0.25) * scale
+    local x1 = (r.x + xoffset + 0.75) * scale
+    local y1 = (r.y + yoffset + 0.75) * scale
+    rectfill(x0, y0, x1, y1, 2)
+    if selected_robot_id != r.id then
+      fillp(0b0101101001011010.1)
+    end
+    rectfill(x0, y0 - 1, x1, y1 - 1, r.col)
+    fillp()
+  end
+end
+
+function draw_target(xoffset, yoffset, scale, cur_state)
+  local x0 = (target_x + xoffset + 0.33) * scale
+  local y0 = (target_y + yoffset + 0.33) * scale
+  local x1 = (target_x + xoffset + 0.66) * scale
+  local y1 = (target_y + yoffset + 0.66) * scale
+  rectfill(x0, y0, x1, y1, 7)
+
+  -- lookup color of target
+  local col = 1
+  for i,r in pairs(cur_state.robots) do
+    if r.id == target_id then
+      col = r.col
+      break
+    end
+  end
+
+  fillp(0b0110110110110110.1)
+    rectfill(x0, y0, x1, y1, col)
+  fillp()
+  --rectfill(x0, y0 - 1, x1, y1 - 1, 12)
+end
+
+function draw_cell(xoffset, yoffset, scale, cell)
+  local col = 15
+  local b = cell.borders
+  if band(b, flags_border_left) != 0 then
+    local x0 = (cell.x + xoffset) * scale
+    local y0 = (cell.y + yoffset) * scale
+    local y = (cell.y + yoffset + 1) * scale - 1
+    line(x0, y0, x0, y, col)
+  end
+  if band(b, flags_border_right) != 0 then
+    local x0 = (cell.x + xoffset) * scale + (scale - 1)
+    local y0 = (cell.y + yoffset) * scale
+    local y = (cell.y + yoffset + 1) * scale - 1
+    line(x0, y0, x0, y, col)
+  end
+  if band(b, flags_border_top) != 0 then
+    local x0 = (cell.x + xoffset) * scale
+    local y0 = (cell.y + yoffset) * scale
+    local x = (cell.x + xoffset + 1) * scale - 1
+    line(x0, y0, x, y0, col)
+  end
+  if band(b, flags_border_bottom) != 0 then
+    local x0 = (cell.x + xoffset) * scale
+    local y0 = (cell.y + yoffset) * scale + (scale - 1)
+    local x = (cell.x + xoffset + 1) * scale - 1
+    line(x0, y0, x, y0, col)
+  end
+end
+
+-- utils -- 
 
 function split_lines(s)
   local start = 1
@@ -149,6 +353,7 @@ function split_lines(s)
     end
   end
 
+  -- final line
   local ss = sub(s, start, -1) 
   if #ss > 0 and ss ~= "\n" then
     add(ret, ss)
