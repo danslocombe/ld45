@@ -88,6 +88,8 @@ function reset()
   animating = false
   animation_obj = {}
   should_gotonext = false
+  rewind_t = 0
+  rewind_t_max = 6
 end 
 
 function _init()
@@ -106,6 +108,9 @@ function _update60()
   --end
 
   t += 1
+  if rewind_t > 0 then
+    rewind_t -= 1
+  end
 
   for i,o in pairs(drawables) do
     o.tick(o)
@@ -155,6 +160,7 @@ function _update60()
     if #history > 0 then
       cur_state = history[#history]
       del(history, cur_state)
+      rewind_t = rewind_t_max
     end
   elseif btnp(5) then
     local prev_selected = selected_rid
@@ -163,7 +169,7 @@ function _update60()
     add(drawables, create_select_anim(prev_selected, selected_rid, cur_state))
   end
 
-  if ndir != none then
+  if ndir != none and rewind_t <= 0 then
     -- setup next move --
 
     local old_state = cur_state
@@ -407,6 +413,10 @@ function _draw()
   if shake_t > 0 then
     dump_noise(shake_t / shake_t_max)
   end
+
+  if rewind_t > 0 then
+    dump_rewind_noise()
+  end
 end
 
 function draw_robots(xoffset, yoffset, scale, state)
@@ -489,8 +499,23 @@ function dump_noise(mag)
   for i=1,mag * 30 do
     local len = 50 + rnd(100)
     local pos = rnd(screen_size) + screen_start
-    len = min(len, screen_start + screen_size)
+    len = min(len, screen_start + screen_size - pos)
     memset(pos, rnd(64), len)
+  end
+end
+
+function dump_rewind_noise()
+  local screen_start = 0x6000
+  local screen_size = 8000
+  local bar_size = 1000
+  local bar_start_frac = t / 100 % 1
+  local top_start = screen_start + screen_size * bar_start_frac
+  local top_end = top_start + bar_size
+  for i=1,10 do
+    local len = 50 + rnd(100)
+    local pos = rnd(bar_size) + top_start
+    len = min(len, screen_start + screen_size - pos)
+    memset(pos, 6001.44444, len)
   end
 end
 
