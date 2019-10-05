@@ -81,8 +81,13 @@ function reset()
 
   target_x = 1
   target_y = 1
-  target_id = 1
+  target_rid = 1
   level = 0
+  shake_t = 0
+  shake_t_max = 4
+  animating = false
+  animation_obj = {}
+  should_gotonext = false
 end 
 
 function _init()
@@ -92,7 +97,7 @@ function _init()
   generate_target(target_robot)
 
   t = 0
-  selected_robot_id = 1
+  selected_rid = 1
 end
 
 function _update60()
@@ -101,6 +106,39 @@ function _update60()
   --end
 
   t += 1
+
+  for i,o in pairs(drawables) do
+    o.tick(o)
+  end
+
+  if animating then
+    animation_obj.xvel += animation_obj.xaccel
+    animation_obj.yvel += animation_obj.yaccel
+    animation_obj.x += animation_obj.xvel
+    animation_obj.y += animation_obj.yvel
+    local d = animation_obj.dir
+
+    if d == down and animation_obj.y > animation_obj.new.y then
+      animating = false
+    elseif d == up and animation_obj.y < animation_obj.new.y then
+      animating = false
+    elseif d == right and animation_obj.x > animation_obj.new.x then
+      animating = false
+    elseif d == left and animation_obj.x < animation_obj.new.x then
+      animating = false
+    end
+
+    if not animating then
+      shake_t = shake_t_max / 3
+    end
+
+    return false
+  end
+
+  if should_gotonext then
+    should_gotonext = false
+    next_level()
+  end
 
   local ndir = none
   if btnp(0) then
@@ -112,33 +150,65 @@ function _update60()
   elseif btnp(3) then
     ndir = down
   elseif btnp(4) then
-    --selected_robot_id = 1 + ((selected_robot_id - 2) % #cur_state.robots)
-    --print_debug("selecting " .. selected_robot_id)
+    --selected_rid = 1 + ((selected_rid - 2) % #cur_state.robots)
+    --print_debug("selecting " .. selected_rid)
     if #history > 0 then
       cur_state = history[#history]
       del(history, cur_state)
     end
   elseif btnp(5) then
-    selected_robot_id = 1 + ((selected_robot_id) % #cur_state.robots)
-    print_debug("selecting " .. selected_robot_id)
+    local prev_selected = selected_rid
+    selected_rid = 1 + ((selected_rid) % #cur_state.robots)
+    print_debug("selecting " .. selected_rid)
+    add(drawables, create_select_anim(prev_selected, selected_rid, cur_state))
   end
 
   if ndir != none then
+    -- setup next move --
 
     local old_state = cur_state
-    cur_state = move_robot(ndir, selected_robot_id, cur_state)
+    cur_state = move_robot(ndir, selected_rid, cur_state)
+
+    local old_robot = {}
+    for i,r in pairs(old_state.robots) do
+      if r.id == selected_rid then
+        old_robot = r
+        break
+      end
+    end
+    local new_robot = {}
+    for i,r in pairs(cur_state.robots) do
+      if r.id == selected_rid then
+        new_robot = r
+        break
+      end
+    end
+
+    animating = true
+    local move_vec = vec_from_dir(ndir)
+    local accel = 0.13
+    animation_obj = {
+      rid = selected_rid,
+      old = old_robot,
+      new = new_robot,
+      dir = ndir,
+      x = old_robot.x,
+      y = old_robot.y,
+      xvel = 0,
+      yvel = 0,
+      xaccel = accel * move_vec.x,
+      yaccel = accel * move_vec.y,
+    }
 
     -- todo only add to history if states are different
     add(history, old_state)
 
     -- check goal
-    for i,r in pairs(cur_state.robots) do
-      if r.id == target_id then
-        if r.x == target_x and r.y == target_y then
-          next_level()
-        end
+    if new_robot.id == target_rid then
+      if new_robot.x == target_x and new_robot.y == target_y then
 
-        break
+        -- delay next level until animation finishes
+        should_gotonext = true
       end
     end
   end
@@ -156,6 +226,8 @@ function next_level()
   local target_robot = 1 + flr(rnd(#cur_state.robots))
   generate_target(target_robot)
   history = {}
+
+  shake_t = shake_t_max
 end
 
 function create_robot(x, y, id, col)
@@ -215,7 +287,7 @@ function generate_target(target_robot)
 
   target_x = state.robots[target_robot].x
   target_y = state.robots[target_robot].y
-  target_id = target_robot
+  target_rid = target_robot
 end
 
 function place_free(x, y, state)
@@ -272,22 +344,11 @@ function move_robot(dir, id, state)
     end
   end
 
-  local mx = 0
-  local my = 0
-  if dir == left then
-    mx = -1
-  elseif dir == right then
-    mx = 1
-  elseif dir == down then
-    my = 1
-  elseif dir == up then
-    my = -1
-  end
-
+  local move_vec = vec_from_dir(dir)
   while (not should_stop(new_robot.x, new_robot.y, dir, state)) 
-    and (place_free(new_robot.x + mx, new_robot.y + my, state)) do
-    new_robot.x = new_robot.x + mx
-    new_robot.y = new_robot.y + my
+    and (place_free(new_robot.x + move_vec.x, new_robot.y + move_vec.y, state)) do
+    new_robot.x = new_robot.x + move_vec.x
+    new_robot.y = new_robot.y + move_vec.y
   end
 
   local new_state = {
@@ -308,7 +369,7 @@ function move_robot(dir, id, state)
   return new_state
 end
 
--- draw --
+-- drawing --
 
 function _draw()
   cls(13)
@@ -316,6 +377,14 @@ function _draw()
   local scale = 8
   local x0 = 3
   local y0 = 3
+
+  if shake_t > 0 then
+    shake_t -= 1
+    local d = rnd(1.0)
+    local r = 0.5 * shake_t / shake_t_max
+    x0 += r * cos(d)
+    y0 += r * sin(d)
+  end
 
   local bgsize = 10
   for i = 0,10 do
@@ -328,22 +397,35 @@ function _draw()
     draw_cell(x0, y0, scale, cell)
   end
 
-  for i,b in pairs(drawables) do
-    b.draw()
+  draw_target(x0, y0, scale, cur_state)
+  draw_robots(x0, y0, scale, cur_state)
+
+  for i,o in pairs(drawables) do
+    o.draw(o, x0, y0, scale)
   end
 
-  draw_state(x0, y0, scale, cur_state)
+  if shake_t > 0 then
+    dump_noise(shake_t / shake_t_max)
+  end
 end
 
-function draw_state(xoffset, yoffset, scale, state)
-  draw_target(xoffset, yoffset, scale, cur_state)
+function draw_robots(xoffset, yoffset, scale, state)
   for i,r in pairs(state.robots) do
-    local x0 = (r.x + xoffset + 0.25) * scale
-    local y0 = (r.y + yoffset + 0.25) * scale
-    local x1 = (r.x + xoffset + 0.75) * scale
-    local y1 = (r.y + yoffset + 0.75) * scale
+
+    local rx = r.x
+    local ry = r.y
+
+    if animating and r.id == animation_obj.rid then
+      rx = animation_obj.x
+      ry = animation_obj.y
+    end
+
+    local x0 = (rx + xoffset + 0.25) * scale
+    local y0 = (ry + yoffset + 0.25) * scale
+    local x1 = (rx + xoffset + 0.75) * scale
+    local y1 = (ry + yoffset + 0.75) * scale
     rectfill(x0, y0 - 1, x1, y1, 2)
-    if selected_robot_id != r.id then
+    if selected_rid != r.id then
       fillp(0b0101101001011010.1)
     end
     rectfill(x0, y0 - 1, x1, y1 - 1, r.col)
@@ -361,7 +443,7 @@ function draw_target(xoffset, yoffset, scale, cur_state)
   -- lookup color of target
   local col = 1
   for i,r in pairs(cur_state.robots) do
-    if r.id == target_id then
+    if r.id == target_rid then
       col = r.col
       break
     end
@@ -401,6 +483,79 @@ function draw_cell(xoffset, yoffset, scale, cell)
   end
 end
 
+function dump_noise(mag)
+  local screen_start = 0x6000
+  local screen_size = 8000
+  for i=1,mag * 30 do
+    local len = 50 + rnd(100)
+    local pos = rnd(screen_size) + screen_start
+    len = min(len, screen_start + screen_size)
+    memset(pos, rnd(64), len)
+  end
+end
+
+-- other --
+
+function create_select_anim(start_rid, end_rid)
+  -- just use cur_state
+
+  local start = get_robot(start_rid, cur_state)
+
+  local obj = {
+    state = 0,
+    t = 0,
+    x = start.x,
+    y = start.y,
+  }
+
+  obj.tick = function(o)
+    local scale = 4
+    local target = get_robot_anim_pos(end_rid, cur_state)
+
+    if o.state == 0 then
+      scale = 2
+      if o.t > 5 then
+        o.state = 1
+        local start = get_robot_anim_pos(start_rid, cur_state)
+        o.x = start.x
+        o.y = start.y
+      end
+    else 
+      if o.t > 20 then
+        del(drawables, o)
+        return;
+      end
+    end
+
+    o.x = (o.x * (scale - 1) + target.x) / scale
+    o.y = (o.y * (scale - 1) + target.y) / scale
+
+    o.t += 1
+  end
+
+  obj.draw = function(o, xoffset, yoffset, scale)
+    local col = 0
+    local other = {}
+
+    if o.state == 0 then
+      col = robot_cols[start_rid]
+      other = get_robot_anim_pos(start_rid, cur_state)
+    else
+      col = robot_cols[end_rid]
+      other = get_robot_anim_pos(end_rid, cur_state)
+    end
+
+    local this_x = (xoffset + o.x + 0.5) * scale
+    local this_y = (yoffset + o.y + 0.5) * scale
+    local other_x = (xoffset + other.x + 0.5) * scale
+    local other_y = (yoffset + other.y + 0.5) * scale
+
+    line(this_x, this_y, other_x, other_y, col)
+  end
+
+  return obj
+end
+
 -- utils -- 
 
 function split_lines(s)
@@ -423,4 +578,39 @@ function split_lines(s)
   end
 
   return ret
+end
+
+function vec_from_dir(dir)
+  local mx = 0
+  local my = 0
+  if dir == left then
+    mx = -1
+  elseif dir == right then
+    mx = 1
+  elseif dir == down then
+    my = 1
+  elseif dir == up then
+    my = -1
+  end
+
+  return {x = mx, y = my}
+end
+
+function get_robot_anim_pos(rid, state)
+  if not animating or rid != animation_obj.rid then 
+    return get_robot(rid, state)
+  end
+
+  return animation_obj
+end
+
+function get_robot(rid, state)
+  for i,r in pairs(state.robots) do
+    if r.id == rid then
+      return r
+    end
+  end
+
+  print_debug("could not find: " .. rid)
+  return nil
 end
