@@ -134,6 +134,7 @@ function _update60()
     end
 
     if not animating then
+      sfx(2)
       shake_t = shake_t_max / 3
     end
 
@@ -155,23 +156,24 @@ function _update60()
   elseif btnp(3) then
     ndir = down
   elseif btnp(4) then
-    --selected_rid = 1 + ((selected_rid - 2) % #cur_state.robots)
-    --print_debug("selecting " .. selected_rid)
     if #history > 0 then
       cur_state = history[#history]
       del(history, cur_state)
       rewind_t = rewind_t_max
+      sfx(4)
     end
   elseif btnp(5) then
     local prev_selected = selected_rid
     selected_rid = 1 + ((selected_rid) % #cur_state.robots)
     print_debug("selecting " .. selected_rid)
     add(drawables, create_select_anim(prev_selected, selected_rid, cur_state))
+    sfx(3)
   end
 
   if ndir != none and rewind_t <= 0 then
     -- setup next move --
 
+    sfx(1)
     local old_state = cur_state
     cur_state = move_robot(ndir, selected_rid, cur_state)
 
@@ -221,6 +223,7 @@ function _update60()
 end
 
 function next_level()
+  sfx(0)
   level += 1
   local unlock = unlock_pattern[level]
   if unlock == unlock_robot then
@@ -392,6 +395,8 @@ function _draw()
     y0 += r * sin(d)
   end
 
+  draw_target(x0, y0, scale, cur_state)
+
   local bgsize = 10
   for i = 0,10 do
     local bgcol = 2
@@ -403,7 +408,6 @@ function _draw()
     draw_cell(x0, y0, scale, cell)
   end
 
-  draw_target(x0, y0, scale, cur_state)
   draw_robots(x0, y0, scale, cur_state)
 
   for i,o in pairs(drawables) do
@@ -639,3 +643,9 @@ function get_robot(rid, state)
   print_debug("could not find: " .. rid)
   return nil
 end
+__sfx__
+000100000a65009650076500365002650026500265001650223602236021260016500265001650016500165002650016500165001650016500165002650016000000000000000000000000000000000000000000
+000100002a650126500a6500665000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000100001705014150120500f0500c050091500a05008050070500705006650050500405004150040500405000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000300000713010130092301912011220221201a22022030220202201022000251000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000200003c6003d6103c6103c6203d6303d6303d6303d6403d6403d6003d600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
