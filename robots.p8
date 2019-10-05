@@ -2,18 +2,49 @@ pico-8 cartridge // http://www.pico-8.com
 version 16
 __lua__
 
+-- an adaptation of the amazing ricochet robots
+
+debug = true
+
+function print_debug(s)
+  if debug then
+    printh(s)
+  end
+end
+
 none=0
 left=1
 right=2
 up=3
 down=4
 
-flags_border_none   = 0
+flags_border_none   = 0x00
 flags_border_left   = 0x01
 flags_border_right  = 0x02
 flags_border_top    = 0x04
 flags_border_bottom = 0x08
 flags_border_all = bor(flags_border_left, bor(flags_border_right, bor(flags_border_top, flags_border_bottom)))
+
+unlock_robot = 0
+unlock_tile = 1
+
+robot_cols = {
+  14,
+  12,
+  11,
+}
+
+unlock_pattern = {
+  unlock_robot,
+  unlock_tile,
+  unlock_robot,
+  unlock_tile,
+  unlock_tile,
+  unlock_robot,
+  unlock_tile,
+  unlock_tile,
+  unlock_robot,
+}
 
 -- tile chars:
 -- l / r / t / b for single
@@ -33,10 +64,31 @@ tiles = {
 ]],
 } 
 
+function reset()
+  print_debug("resetting..")
+  grid = {}
+  drawables = {}
+  cur_state = {
+    t = 0,
+    robots = {
+      create_robot(2, 2, 1, 14),
+      --create_robot(5, 5, 2, 12),
+      --create_robot(6, 8, 3, 11),
+    },
+  }
+
+  history = {}
+
+  target_x = 1
+  target_y = 1
+  target_id = 1
+  level = 0
+end 
+
 function _init()
   reset()
   load_tile(0, 0, tiles[1])
-  local target_robot = 1 + flr(rnd(3))
+  local target_robot = 1 -- + flr(rnd(3))
   generate_target(target_robot)
 
   t = 0
@@ -45,8 +97,10 @@ end
 
 function _update60()
   --if t % 4 == 0 then
-    --printh(stat(7))
+    --print_debug(stat(7))
   --end
+
+  t += 1
 
   local ndir = none
   if btnp(0) then
@@ -58,35 +112,51 @@ function _update60()
   elseif btnp(3) then
     ndir = down
   elseif btnp(4) then
-    selected_robot_id = 1 + ((selected_robot_id - 2) % #cur_state.robots)
-    printh("selecting " .. selected_robot_id)
+    --selected_robot_id = 1 + ((selected_robot_id - 2) % #cur_state.robots)
+    --print_debug("selecting " .. selected_robot_id)
+    if #history > 0 then
+      cur_state = history[#history]
+      del(history, cur_state)
+    end
   elseif btnp(5) then
     selected_robot_id = 1 + ((selected_robot_id) % #cur_state.robots)
-    printh("selecting " .. selected_robot_id)
+    print_debug("selecting " .. selected_robot_id)
   end
 
   if ndir != none then
+
+    local old_state = cur_state
     cur_state = move_robot(ndir, selected_robot_id, cur_state)
+
+    -- todo only add to history if states are different
+    add(history, old_state)
+
+    -- check goal
+    for i,r in pairs(cur_state.robots) do
+      if r.id == target_id then
+        if r.x == target_x and r.y == target_y then
+          next_level()
+        end
+
+        break
+      end
+    end
   end
 end
 
-function reset()
-  printh("resetting..")
-  grid = {}
-  drawables = {}
-  cur_state = {
-    t = 0,
-    robots = {
-      create_robot(2, 2, 1, 14),
-      create_robot(5, 5, 2, 12),
-      create_robot(6, 8, 3, 11),
-    },
-  }
-
-  target_x = 1
-  target_y = 1
-  target_id = 1
-end 
+function next_level()
+  level += 1
+  local unlock = unlock_pattern[level]
+  if unlock == unlock_robot then
+      local rx = 2
+      local ry = 2
+      local rid = #cur_state.robots + 1
+      add(cur_state.robots, create_robot(rx, ry, rid, robot_cols[rid]))
+  end
+  local target_robot = 1 + flr(rnd(#cur_state.robots))
+  generate_target(target_robot)
+  history = {}
+end
 
 function create_robot(x, y, id, col)
   return {x = x, y = y, id = id, col = col}
@@ -193,40 +263,7 @@ function should_stop(x, y, dir, state)
   return false
 end
 
--- draw --
-
-function _draw()
-  cls(13)
-
-  local scale = 8
-  local x0 = 3
-  local y0 = 3
-
-  local bgsize = 10
-  for i = 0,10 do
-    local bgcol = 2
-    line((x0 + i) * scale, y0 * scale, (x0 + i) * scale, (y0 + bgsize) * scale, bgcol)
-    line(x0 * scale, (y0 + i) * scale, (x0 + bgsize) * scale, (y0 + i) * scale, bgcol)
-  end
-
-  for i,cell in pairs(grid) do
-    draw_cell(x0, y0, scale, cell)
-  end
-
-  for i,b in pairs(drawables) do
-    b.draw()
-  end
-
-  draw_state(x0, y0, scale, cur_state)
-
-  t = t + 1
-  circ(12 + 8 * sin(t / 100), 12, 4, 7)
-
-end
-
 function move_robot(dir, id, state)
-  --local pos_clear = 
-
   local player = state.robots[id]
   for i,r in pairs(state.robots) do
     if r.id == id then
@@ -261,7 +298,7 @@ function move_robot(dir, id, state)
   }
 
   -- copy over non-moving robots into new state
-  -- as robots are immutable we can reference old
+  -- as robots are immutable we can reference existing objs
   for i,r in pairs(state.robots) do
     if r.id != id then
       add(new_state.robots, r)
@@ -271,6 +308,33 @@ function move_robot(dir, id, state)
   return new_state
 end
 
+-- draw --
+
+function _draw()
+  cls(13)
+
+  local scale = 8
+  local x0 = 3
+  local y0 = 3
+
+  local bgsize = 10
+  for i = 0,10 do
+    local bgcol = 2
+    line((x0 + i) * scale, y0 * scale, (x0 + i) * scale, (y0 + bgsize) * scale, bgcol)
+    line(x0 * scale, (y0 + i) * scale, (x0 + bgsize) * scale, (y0 + i) * scale, bgcol)
+  end
+
+  for i,cell in pairs(grid) do
+    draw_cell(x0, y0, scale, cell)
+  end
+
+  for i,b in pairs(drawables) do
+    b.draw()
+  end
+
+  draw_state(x0, y0, scale, cur_state)
+end
+
 function draw_state(xoffset, yoffset, scale, state)
   draw_target(xoffset, yoffset, scale, cur_state)
   for i,r in pairs(state.robots) do
@@ -278,7 +342,7 @@ function draw_state(xoffset, yoffset, scale, state)
     local y0 = (r.y + yoffset + 0.25) * scale
     local x1 = (r.x + xoffset + 0.75) * scale
     local y1 = (r.y + yoffset + 0.75) * scale
-    rectfill(x0, y0, x1, y1, 2)
+    rectfill(x0, y0 - 1, x1, y1, 2)
     if selected_robot_id != r.id then
       fillp(0b0101101001011010.1)
     end
@@ -288,10 +352,10 @@ function draw_state(xoffset, yoffset, scale, state)
 end
 
 function draw_target(xoffset, yoffset, scale, cur_state)
-  local x0 = (target_x + xoffset + 0.33) * scale
-  local y0 = (target_y + yoffset + 0.33) * scale
-  local x1 = (target_x + xoffset + 0.66) * scale
-  local y1 = (target_y + yoffset + 0.66) * scale
+  local x0 = (target_x + xoffset + 0.13) * scale
+  local y0 = (target_y + yoffset + 0.13) * scale
+  local x1 = (target_x + xoffset + 0.96) * scale
+  local y1 = (target_y + yoffset + 0.96) * scale
   rectfill(x0, y0, x1, y1, 7)
 
   -- lookup color of target
@@ -306,7 +370,6 @@ function draw_target(xoffset, yoffset, scale, cur_state)
   fillp(0b0110110110110110.1)
     rectfill(x0, y0, x1, y1, col)
   fillp()
-  --rectfill(x0, y0 - 1, x1, y1 - 1, 12)
 end
 
 function draw_cell(xoffset, yoffset, scale, cell)
