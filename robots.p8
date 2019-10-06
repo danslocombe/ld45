@@ -7,7 +7,7 @@ __lua__
 --
 -- dan slocombe 2019
 
-debug = false
+debug = true
 
 function print_debug(s)
   if debug then
@@ -40,10 +40,6 @@ robot_cols = {
 }
 
 unlock_pattern = {
-  unlock_robot,
-  unlock_none,
-
-  unlock_tile,
   unlock_none,
   unlock_robot,
   unlock_none,
@@ -51,13 +47,25 @@ unlock_pattern = {
 
   unlock_tile,
   unlock_none,
-
-  unlock_tile,
+  unlock_none,
   unlock_none,
   unlock_none,
   unlock_robot,
   unlock_none,
   unlock_none,
+  unlock_none,
+  unlock_none,
+
+  unlock_tile,
+  unlock_none,
+  unlock_none,
+
+  unlock_tile,
+  unlock_none,
+  unlock_none,
+  unlock_none,
+  unlock_none,
+  unlock_robot,
 
 }
 
@@ -84,7 +92,7 @@ tiles = {
 .      2 .
 .        .
 .  3     .
-.b      1.
+.b      ..
 .        .
 .       ..
 ..........
@@ -115,16 +123,163 @@ tiles = {
 ]],
 } 
 
-function reset()
-  print_debug("resetting..")
-  grid = {}
-  drawables = {}
+function _init()
+  t_menu = 0
+  update_fn = update_menu
+  draw_fn = draw_menu
+end
+
+function _update60()
+  update_fn()
+end
+
+function _draw()
+  draw_fn()
+end
+
+function update_menu()
+  t_menu += 1
+  if anykey_pressed() then
+    t = 0
+    stage = 0
+    static_t = 4
+    drawables = {}
+    update_fn = update_help
+    draw_fn = draw_help
+    sfx(7)
+  end
+end
+
+function draw_menu()
+  cls(13)
+  print("metal wombles", 40, 54, 7)
+  print("play", 58, 68, 7)
+  print("dan slocombe", 42, 112, 7)
+  if flr(t_menu / 30) % 2 == 0 then
+    spr(17, 48, 67)
+  end
+  local dir = t_menu / 100
+  local r = 2
+  local x = 80 + r*cos(dir)
+  local y = 80 + r*sin(dir)
+  local sx = 0
+  if (flr(t_menu / 50) % 8) < 2 then
+    sx = 3*8
+  end
+  sspr(sx, 4*8, 3*8, 2*8, x, y, 3*16, 2*16)
+end
+
+function update_help()
+  t+=1
+  if anykey_pressed() then
+    if stage == 0 then
+      static_t = 4
+      sfx(7)
+      stage = 1
+    else
+      start_game()
+      return
+    end
+  end
+
+  if stage == 1 then
+    if t % 80 == 0 then
+      local prev_selected = selected_rid
+      selected_rid = 1 + ((selected_rid) % 2)
+      add(drawables, create_select_anim(prev_selected, selected_rid, cur_state))
+    end
+
+    for i,o in pairs(drawables) do
+      o.tick(o)
+    end
+  end
+end
+
+function draw_help()
+  cls(13)
+  if stage == 0 then
+    print("guide the robots to\nhelp regrow the forest", 26, 64 - 16, 7)
+    selected_rid = 1
+    local rr = {x = 0, y = 0, id = 1}
+    draw_robot(6, 10, 8, rr)
+    spr(17, 60, 97 - 16)
+    target_x = 0
+    target_y = 0
+    target_rid = 1
+    draw_target(9, 10, 8)
+  else
+    print("press (x) to switch robots", 16, 60 - 16, 7)
+    local rr = {x = 0, y = 0, id = 1}
+    draw_robot(6, 8, 8, rr)
+    local rr2 = {x = 3, y = 0, id = 2}
+    cur_state = {robots = {rr, rr2}}
+    draw_robot(6, 8, 8, rr2)
+    for i,o in pairs(drawables) do
+      o.draw(o, 6, 8, 8)
+    end
+    print("and (z) to rewind moves", 18, 84, 7)
+  end
+
+  if static_t > 0 then
+    dump_noise(static_t / 4)
+    static_t -= 1
+  end
+end
+
+function show_reset()
+  update_fn = update_reset
+  draw_fn = draw_reset
+  t_menu = 0
+end
+
+function update_reset()
+  t_menu += 1
+  if anykey_pressed() then
+    start_game()
+  end
+end
+
+function draw_reset()
+  cls(13)
+  print("planted " .. level .. " trees", 40, 54, 7)
+  print("retry?", 58, 68, 7)
+  if flr(t_menu / 30) % 2 == 0 then
+    spr(17, 48, 67)
+  end
+  local dir = t_menu / 100
+  local r = 2
+  local x = 80 + r*cos(dir)
+  local y = 80 + r*sin(dir)
+  local sx = 0
+  if (flr(t_menu / 50) % 8) < 2 then
+    sx = 3*8
+  end
+  sspr(sx, 4*8, 3*8, 2*8, x, y, 3*16, 2*16)
+end
+
+function start_game()
+  reset()
+  load_tile(0, 0, tiles[1 + flr(rnd(#tiles))])
+  cur_state = {}
   cur_state = {
     t = 0,
     robots = {
       create_robot(2, 2, 1, robot_cols[1]),
     },
   }
+  local target_robot = 1 -- + flr(rnd(3))
+  generate_target(target_robot)
+
+  update_fn = update_game
+  draw_fn = draw_game
+end
+
+function reset()
+  print_debug("resetting..")
+  grid = {}
+  drawables = {}
+  drawables_bg = {}
+  cur_state = {}
 
   history = {}
   actions = {}
@@ -136,7 +291,6 @@ function reset()
   shake_t = 0
   shake_t_max = 4
   animating = false
-  animation_obj = {}
   should_gotonext = false
   rewind_t = 0
   rewind_t_max = 6
@@ -156,34 +310,24 @@ function reset()
   turns_left_t_max = 60
   turns_left_t = turns_left_t_max
 
+  selected_rid = 1
+  t=0
+
   tile_count = 1
 end 
 
-function _init()
-  reset()
-  load_tile(0, 0, tiles[1 + flr(rnd(#tiles))])
-  local target_robot = 1 -- + flr(rnd(3))
-  generate_target(target_robot)
-
-  t = 0
-  selected_rid = 1
-end
-
-function _update60()
-
+function update_game()
   tick_vars()
 
   for i,o in pairs(drawables) do
     -- pass in "this" object to prevent self references in closures, gc issues
     o.tick(o)
   end
-
-  if should_gotonext then
-    should_gotonext = false
-    next_level()
+  for i,o in pairs(drawables_bg) do
+    o.tick(o)
   end
 
-  if animating then
+  if animating and animation_obj != nil then
     animation_obj.xvel += animation_obj.xaccel
     animation_obj.yvel += animation_obj.yaccel
     animation_obj.x += animation_obj.xvel
@@ -200,12 +344,19 @@ function _update60()
       animating = false
     end
 
+    create_part(animation_obj.x, animation_obj.y)
+
     if not animating then
       sfx(2)
       shake_t = shake_t_max / 3
     end
   else
-    update_player()
+    if should_gotonext then
+      should_gotonext = false
+      next_level()
+    else
+      update_player()
+    end
   end
 end
 
@@ -229,13 +380,13 @@ function tick_vars()
     --local tt = turns_left - cur_state.t
     local tt = turns_left
     if tt <= 0 then
-      _init()
+      show_reset()
+      return
     elseif tt <= 5 then
       sfx(6)
-    elseif turns_left < 10 then
+    elseif turns_left < 8 then
       sfx(5)
-    else
-    --elseif turns_left < 16 then
+    elseif turns_left < 12 then
       sfx(7)
     end
   end
@@ -263,7 +414,6 @@ function update_player()
   elseif btnp(5) then
     local prev_selected = selected_rid
     selected_rid = 1 + ((selected_rid) % #cur_state.robots)
-    print_debug("selecting " .. selected_rid)
     add(drawables, create_select_anim(prev_selected, selected_rid, cur_state))
     sfx(3)
   end
@@ -298,7 +448,6 @@ function update_player()
       end
     end
 
-    animating = true
     local move_vec = vec_from_dir(ndir)
     local accel = 0.13
     animation_obj = {
@@ -313,6 +462,8 @@ function update_player()
       xaccel = accel * move_vec.x,
       yaccel = accel * move_vec.y,
     }
+
+    animating = true
 
     -- todo only add to history if states are different
     add(history, old_state)
@@ -402,6 +553,13 @@ function add_tile()
 end
 
 function create_robot(x, y, id, col)
+  create_face(id, 80, 80)
+  sfx(7 + id)
+  local prev_selected = selected_rid
+  selected_rid = id
+  if prev_selected != nil and id > 1 then
+    add(drawables, create_select_anim(prev_selected, id, cur_state))
+  end
   return {x = x, y = y, id = id, col = col}
 end
 
@@ -787,7 +945,7 @@ end
 
 -- drawing --
 
-function _draw()
+function draw_game()
   cls(13)
 
   local scale = draw_scale
@@ -802,7 +960,11 @@ function _draw()
     y0 += r * sin(d)
   end
 
-  draw_target(x0, y0, scale, cur_state)
+  for i,o in pairs(drawables_bg) do
+    o.draw(o, x0, y0, scale)
+  end
+
+  draw_target(x0, y0, scale)
 
   local bgcol = 2
   --if (t % 64 < 32) then
@@ -820,7 +982,9 @@ function _draw()
     draw_cell(x0, y0, scale, cell)
   end
 
-  draw_robots(x0, y0, scale, cur_state)
+  for i,r in pairs(cur_state.robots) do
+    draw_robot(x0, y0, scale, r)
+  end
 
   for i,o in pairs(drawables) do
     o.draw(o, x0, y0, scale)
@@ -871,43 +1035,40 @@ function draw_big_num(n, x, y)
   spr(n, xx, y)
 end
 
-function draw_robots(xoffset, yoffset, scale, state)
-  for i,r in pairs(state.robots) do
+function draw_robot(xoffset, yoffset, scale, r)
+  local rx = r.x
+  local ry = r.y
 
-    local rx = r.x
-    local ry = r.y
-
-    if animating and r.id == animation_obj.rid then
-      rx = animation_obj.x
-      ry = animation_obj.y
-    end
-
-    local x0 = (rx + xoffset + 0.25) * scale
-    local y0 = (ry + yoffset + 0.25) * scale
-    local x1 = (rx + xoffset + 0.75) * scale
-    local y1 = (ry + yoffset + 0.75) * scale
-
-    if selected_rid == r.id then
-      local k = 2
-      local c = 0.5
-      if animating then
-        y0 += k + c
-      else
-        y0 += k * sqr(abs(sin(t / 300), 2)) + c
-      end
-    end
-
-    rectfill(x0, y0 - 1, x1, y1, 2)
-
-    if selected_rid != r.id then
-      fillp(0b0101101001011010.1)
-    end
-    rectfill(x0, y0 - 1, x1, y1 - 1, r.col)
-    fillp()
+  if animating and r.id == animation_obj.rid then
+    rx = animation_obj.x
+    ry = animation_obj.y
   end
+
+  local x0 = (rx + xoffset + 0.25) * scale
+  local y0 = (ry + yoffset + 0.25) * scale
+  local x1 = (rx + xoffset + 0.75) * scale
+  local y1 = (ry + yoffset + 0.75) * scale
+
+  if selected_rid == r.id then
+    local k = 2
+    local c = 0.5
+    if animating then
+      y0 += k + c
+    else
+      y0 += k * sqr(abs(sin(t / 300), 2)) + c
+    end
+  end
+
+  rectfill(x0, y0 - 1, x1, y1, 2)
+
+  if selected_rid != r.id then
+    fillp(0b0101101001011010.1)
+  end
+  rectfill(x0, y0 - 1, x1, y1 - 1, robot_cols[r.id])
+  fillp()
 end
 
-function draw_target(xoffset, yoffset, scale, cur_state)
+function draw_target(xoffset, yoffset, scale)
   local x0 = (target_x + xoffset + 0.13) * scale
   local y0 = (target_y + yoffset + 0.13) * scale
   local x1 = (target_x + xoffset + 0.96) * scale
@@ -916,13 +1077,7 @@ function draw_target(xoffset, yoffset, scale, cur_state)
   rectfill(x0, y0, x1, y1, 7)
 
   -- lookup color of target
-  local col = 1
-  for i,r in pairs(cur_state.robots) do
-    if r.id == target_rid then
-      col = r.col
-      break
-    end
-  end
+  local col = robot_cols[target_rid]
 
   local shift = 2 * (flr(t / 18) % 4)
   local pat = 0b0110110110110110
@@ -988,6 +1143,67 @@ end
 
 -- other --
 
+function create_part(x, y)
+  local obj = {
+    frame = 0,
+  }
+
+  local k = 6
+
+  obj.tick = function(o)
+    o.frame += 1
+
+    if (o.frame > 4 * k) then
+      del(drawables_bg, o)
+    end
+  end
+
+  obj.draw = function(o, xoffset, yoffset, scale)
+    local f = flr(o.frame / k)
+    spr(32 + f, (x + xoffset) * scale, (y + yoffset) * scale)
+  end
+
+  add(drawables_bg, obj)
+end
+
+function create_face(id, x, y)
+  local obj = {
+    t = 0,
+  }
+
+  local k0 = 20
+  local k = 75
+
+  obj.tick = function(o)
+    o.t += 1
+    if (o.t > k) then
+      del(drawables, o)
+    end
+  end
+
+  obj.draw = function(o, xoffset, yoffset, scale)
+    local xx = x
+    local yy = y
+    local sx = 0
+    local sy = 4*8
+
+    if id == 2 or id == 4 then
+      sx = 6 * 8
+    end
+
+    if id > 2 then
+      sy += 2*8 
+    end
+
+    if o.t > k0 then
+      sx += 3*8
+    end
+    sspr(sx, sy, 3*8, 2*8, x, y, 3*16, 2*16)
+  end
+
+  add(drawables, obj)
+end
+
 function create_select_anim(start_rid, end_rid)
   -- ok to use cur_state as we are just creating an animation
   -- that doesnt effect state
@@ -1005,6 +1221,11 @@ function create_select_anim(start_rid, end_rid)
     local scale = 4
     local target = get_robot_anim_pos(end_rid, cur_state)
 
+    if target == nil then
+      del(drawables, o)
+      return
+    end
+
     if o.state == 0 then
       scale = 2
       if o.t > 5 then
@@ -1016,7 +1237,7 @@ function create_select_anim(start_rid, end_rid)
     else 
       if o.t > 20 then
         del(drawables, o)
-        return;
+        return
       end
     end
 
@@ -1030,6 +1251,10 @@ function create_select_anim(start_rid, end_rid)
     local col = 0
     local other = {}
 
+    if cur_state == nil then
+      return
+    end
+
     if o.state == 0 then
       col = robot_cols[start_rid]
       other = get_robot_anim_pos(start_rid, cur_state)
@@ -1038,12 +1263,14 @@ function create_select_anim(start_rid, end_rid)
       other = get_robot_anim_pos(end_rid, cur_state)
     end
 
-    local this_x = (xoffset + o.x + 0.5) * scale
-    local this_y = (yoffset + o.y + 0.5) * scale
-    local other_x = (xoffset + other.x + 0.5) * scale
-    local other_y = (yoffset + other.y + 0.5) * scale
+    if other != nil then
+      local this_x = (xoffset + o.x + 0.5) * scale
+      local this_y = (yoffset + o.y + 0.5) * scale
+      local other_x = (xoffset + other.x + 0.5) * scale
+      local other_y = (yoffset + other.y + 0.5) * scale
 
-    line(this_x, this_y, other_x, other_y, col)
+      line(this_x, this_y, other_x, other_y, col)
+    end
   end
 
   return obj
@@ -1161,6 +1388,10 @@ function invert_dir(d)
   end
 end
 
+function anykey_pressed()
+  return btnp(0) or btnp(1) or btnp(2) or btnp(3) or btnp(4) or btnp(5)
+end
+
 __gfx__
 00777700000070000007700000077700000770000007770000077000007777000007700000777700000000000000000000000000000000000000000000000000
 00700700000770000070070000000700007070000007000000700000000007000070070000700700000000000000000000000000000000000000000000000000
@@ -1177,12 +1408,74 @@ __gfx__
 07700000000007700000700000777770000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00700000000007000000700000077700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000700000007000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000000000000000000000b00000b0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000000000000000000000b00000b0b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000000000000b00000b0b0000000bb00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000b0000000b00000b0b00000bbb000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000000000000000000000000000bb000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000000000000e2000000000000000000000000e000000000000000000000c2000000000000000000000000c0000000000000000000000000000000000000
+00000000000000000e200000000000000000000000e2000000000000000000000c200000000000000000000000c2000000000000000000000000000000000000
+00000000000000000e20000000000000000000000e20000000000000000000000c20000000000000000000000c20000000000000000000000000000000000000
+00000000000000000e20000000000000000000000e20000000000000000000000c20000000000000000000000c20000000000000000000000000000000000000
+00000000000000000e20000000000000000000000e20000000000000000000000c20000000000000000000000c20000000000000000000000000000000000000
+00000eeeeeeeeeeeeee0000000000eeeeeeeeeeeeee0000000000cccccccccccccc0000000000cccccccccccccc0000000000000000000000000000000000000
+0000eeeeeeeeeeeeeeee00000000eeeeeeeeeeeeeeee000000000c2222cccc2222cc000000000c2222cccc2222cc000000000000000000000000000000000000
+0000eee2eeeeeeee2eee00000000eee2eeeeeeee2eee0000000002dddd2cc2dddd2c0000000002dddd2cc2dddd2c000000000000000000000000000000000000
+0000ee2e2eeeeee2e2ee00000000ee2e2eeeeee2e2ee000000000211dd222211dd220000000002d11d2222d11d22000000000000000000000000000000000000
+0000e2eee2eeee2eee2e00000000e2eee2eeee2eee2e000000000211dd2cc211dd2c0000000002d11d2cc2d11d2c000000000000000000000000000000000000
+0000eeeeeeeeeeeeeeee00000000eeeeeeeeeeeeeeee00000000c2dddd2cc2dddd2c00000000c2dddd2cc2dddd2c000000000000000000000000000000000000
+0000eeeeeeeeeeeeeeee00000000eeee2222222eeeee0000000cc222222cc222222cc000000cc222222cc222222cc00000000000000000000000000000000000
+0000eeee2222222eeeee00000000eeee2222222eeeee0000000cccccccccccccccccc000000cccccccccccccccccc00000000000000000000000000000000000
+0000eeee2222222eeeee00000000eeee2222222eeeee0000000ccccccc2222ccccccc000000ccccccc2222ccccccc00000000000000000000000000000000000
+00000eeeeeeeeeeeeee0000000000eeeeeeeeeeeeee000000000cccccccccccccccc00000000cccccccccccccccc000000000000000000000000000000000000
+00000222222222222220000000000222222222222220000000000222111111111110000000000222111111111110000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000090000000000000000000000090000000000000000000000006200000000000000000000000060000000000000000000000000000000000000000
+00000000000090000000000000000000000090000000000000000000022226200000000000000000022222620000000000000000000000000000000000000000
+00000000000090000000000000000000000090000000000000000002225556222000000000000002225556252000000000000000000000000000000000000000
+00000000999999990000000000000000999999990000000000000025555556255200000000000025555556255200000000000000000000000000000000000000
+00000000922992290000000000000000922992290000000000000255556666255520000000000255556666255520000000000000000000000000000000000000
+00000000999999990000000000000000922992290000000000000255566666655520000000000255566666655520000000000000000000000000000000000000
+000000009922229900000000000000009999999900000000000002552222222255200000000002556dd665565520000000000000000000000000000000000000
+00000000924444290000000000000000999229990000000000000255222222225520000000000255222222225520000000000000000000000000000000000000
+00000000924444290000000000000000992992990000000000000255222662225520000000000255222662225520000000000000000000000000000000000000
+00000000999999990000000000000000999999990000000000000255566666655520000000000255566666655520000000000000000000000000000000000000
+00002222999999992222200000000000999999990000000000000025666666665200000000000025666666665200000000000000000000000000000000000000
+00002499222222229994200000002222222222222222200000000002666666662000000000000002666666662000000000000000000000000000000000000000
+00002499999999999994200000002499999999999994200000000002666666662000000000000002666666662000000000000000000000000000000000000000
+00022999999999999999220000002499999999999994200000000002666666662000000000000002666666662000000000000000000000000000000000000000
 __sfx__
 000100000a65009650076500365002650026500265001650223602236021260016500265001650016500165002650016500165001650016500165002650016000000000000000000000000000000000000000000
 000100002a650126500a6500665000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-000100001701014110120100f0100c010091100a01008010070100701006610050100401004110040100401000000000000000000000000000000000000000000000000000000000000000000000000000000000
+010100001701014110120100f0100c010091100a01008010070100701006610050100401004110040100401000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000300000713010130092301912011220221201a22022030220202201022000251000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000200003c6003d6103c6103c6103d6103d6103d6203d6203d6203d6003d600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 011000002d0502d000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 011000003905000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 011000002105000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000600002655026550267502675030750307503275035750000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000600002405024050117502405010750107502405025750000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000b00002575025750267502675010750107501075010750107501175000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+000b00002575025750267502675010750107501075010750107501175000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+011000000235302450023100225002353024500231002250023530245002310022500e2530000000000000000235302450023100225002353024500231002250023530245002310022500e253000000000000000
+011000000e2501a2501d2501c2501a2501a2501a2501a2501a2501a2501a2501a2501a2530c0000e2400e2400e2501a2501d2501c2501a2501a2501a2501a2501a2501a2501a2501a2501a253000000000000000
+011000000e3530000000000000001a653000000000000000000000000000000000001a6530000000000000000e3530e00300000000001a653000000000000000000003e6211a653000001a653000000000000000
+011000001035304450043100425004353044500431004250043530445004310042500425300000000000000007353074500731007250073530745007310072500535305450053100525011253000000000000000
+__music__
+00 0c0e4d44
+00 0f0e4d44
+00 0c0e0d44
+
