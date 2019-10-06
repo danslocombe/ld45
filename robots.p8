@@ -38,14 +38,24 @@ robot_cols = {
 
 unlock_pattern = {
   unlock_robot,
+  unlock_none,
+
   unlock_tile,
-  --unlock_tile,
+  unlock_none,
   unlock_robot,
-  --unlock_tile,
-  --unlock_tile,
+  unlock_none,
+  unlock_none,
+
+  unlock_tile,
+  unlock_none,
+
+  unlock_tile,
+  unlock_none,
+  unlock_none,
   unlock_robot,
-  --unlock_tile,
-  --unlock_tile,
+  unlock_none,
+  unlock_none,
+
 }
 
 -- tile chars:
@@ -138,10 +148,12 @@ function reset()
   bgsize_x = 10
   bgsize_y = 10
 
-  turns_left_max = 24
+  turns_left_max = 18
   turns_left = turns_left_max
-  turns_left_t_max = 240
+  turns_left_t_max = 300
   turns_left_t = turns_left_t_max
+
+  tile_count = 1
 end 
 
 function _init()
@@ -160,6 +172,11 @@ function _update60()
 
   for i,o in pairs(drawables) do
     o.tick(o)
+  end
+
+  if should_gotonext then
+    should_gotonext = false
+    next_level()
   end
 
   if animating then
@@ -183,15 +200,43 @@ function _update60()
       sfx(2)
       shake_t = shake_t_max / 3
     end
+  else
+    update_player()
+  end
+end
 
-    return false
+function tick_vars()
+  t += 1
+
+  if rewind_t > 0 then
+    rewind_t -= 1
   end
 
-  if should_gotonext then
-    should_gotonext = false
-    next_level()
-  end
+  draw_scale = ease_epsilon(draw_scale, target_draw_scale, 10)
+  draw_xoffset = ease_epsilon(draw_xoffset, target_draw_xoffset, 10)
+  draw_yoffset = ease_epsilon(draw_yoffset, target_draw_yoffset, 10)
 
+  if turns_left_t > 0 then
+    turns_left_t -= 1
+  else
+    turns_left_t = turns_left_t_max
+    turns_left -= 1
+
+    local tt = turns_left - cur_state.t
+    if tt <= 0 then
+      _init()
+    elseif tt <= 5 then
+      sfx(6)
+    elseif turns_left < 10 then
+      sfx(5)
+    else
+    --elseif turns_left < 16 then
+      sfx(7)
+    end
+  end
+end
+
+function update_player()
   local ndir = none
   if btnp(0) then
     ndir = left
@@ -278,36 +323,6 @@ function _update60()
   end
 end
 
-function tick_vars()
-  t += 1
-
-  if rewind_t > 0 then
-    rewind_t -= 1
-  end
-
-  draw_scale = ease_epsilon(draw_scale, target_draw_scale, 10)
-  draw_xoffset = ease_epsilon(draw_xoffset, target_draw_xoffset, 10)
-  draw_yoffset = ease_epsilon(draw_yoffset, target_draw_yoffset, 10)
-
-  if turns_left_t > 0 then
-    turns_left_t -= 1
-  else
-    turns_left_t = turns_left_t_max
-    turns_left -= 1
-
-    local tt = turns_left - cur_state.t
-    if tt <= 0 then
-      _init()
-    elseif tt <= 5 then
-      sfx(6)
-    elseif turns_left < 10 then
-      sfx(5)
-    elseif turns_left < 16 then
-      sfx(7)
-    end
-  end
-end
-
 function next_level()
   sfx(0)
   level += 1
@@ -322,17 +337,7 @@ function next_level()
     end
     add(cur_state.robots, create_robot(rx, ry, rid, robot_cols[rid]))
   elseif unlock == unlock_tile then
-    load_tile(9, 0, tiles[1 + flr(rnd(#tiles))])
-    -- remove right side
-    for i,o in pairs(grid) do
-      if o.x == 9 and o.y > 0 and o.y < 9 then
-        del(grid, o)
-      end
-    end
-    target_draw_xoffset = 1
-    target_draw_yoffset = 4
-    bgsize_x = 19
-    target_draw_scale = 6
+    add_tile()
   end
   local target_robot = 1 + flr(rnd(#cur_state.robots))
   generate_target(target_robot)
@@ -344,6 +349,48 @@ function next_level()
   turns_left_t = turns_left_t_max
 
   shake_t = shake_t_max
+end
+
+function add_tile()
+  if tile_count == 1 then
+    load_tile(9, 0, tiles[1 + flr(rnd(#tiles))])
+    -- remove right side
+    for i,o in pairs(grid) do
+      if o.x == 9 and o.y > 0 and o.y < 9 then
+        del(grid, o)
+      end
+    end
+    target_draw_xoffset = 1
+    target_draw_yoffset = 4
+    bgsize_x = 19
+    target_draw_scale = 6
+  elseif tile_count == 2 then
+    load_tile(0, 9, tiles[1 + flr(rnd(#tiles))])
+    local new_grid = {}
+    for i,o in pairs(grid) do
+      if (o.y != 9) or (o.x <= 0) or (o.x >= 9) then
+        add(new_grid, o)
+      end
+    end
+    grid = new_grid
+
+    target_draw_xoffset = 3
+    target_draw_yoffset = 3
+    target_draw_scale = 5
+    bgsize_y = 19
+
+  elseif tile_count == 3 then
+    load_tile(9, 9, tiles[1 + flr(rnd(#tiles))])
+    local new_grid = {}
+    for i,o in pairs(grid) do
+      if ((o.y != 9) or (o.x <= 9) or (o.x >= 18)) and ((o.x != 9) or (o.y <= 9) or (o.y >= 18)) then
+        add(new_grid, o)
+      end
+    end
+    grid = new_grid
+  end
+
+  tile_count += 1
 end
 
 function create_robot(x, y, id, col)
@@ -398,7 +445,7 @@ end
 
 function generate_target(target_robot)
   local state = cur_state
-  for i = 0,16 * #cur_state.robots + 2*level do
+  for i = 0, 16 * #cur_state.robots + 2*level do
     local dir = 1 + flr(rnd(4))
     local id = 1 + flr(rnd(#cur_state.robots))
     state = move_robot(dir, id, state)
