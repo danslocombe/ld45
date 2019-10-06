@@ -25,25 +25,27 @@ flags_border_top    = 0x04
 flags_border_bottom = 0x08
 flags_border_all = bor(flags_border_left, bor(flags_border_right, bor(flags_border_top, flags_border_bottom)))
 
-unlock_robot = 0
-unlock_tile = 1
+unlock_none = 0
+unlock_robot = 1
+unlock_tile = 2
 
 robot_cols = {
   14,
   12,
-  11,
+  9,
+  6,
 }
 
 unlock_pattern = {
   unlock_robot,
   unlock_tile,
+  --unlock_tile,
   unlock_robot,
-  unlock_tile,
-  unlock_tile,
+  --unlock_tile,
+  --unlock_tile,
   unlock_robot,
-  unlock_tile,
-  unlock_tile,
-  unlock_robot,
+  --unlock_tile,
+  --unlock_tile,
 }
 
 -- tile chars:
@@ -62,6 +64,42 @@ tiles = {
 .   3   1.
 ..........
 ]],
+[[
+..........
+.   r    .
+. 0      .
+.      2 .
+.        .
+.  3     .
+.b      1.
+.        .
+.       1.
+..........
+]],
+[[
+..........
+. r      .
+.    1   .
+. 2      .
+.      3 .
+.        .
+.        .
+.t  0    .
+.       1.
+..........
+]],
+[[
+..........
+. r      .
+.    2   .
+.        .
+. 0      .
+.        .
+.b    1  .
+.   3    .
+.       1.
+..........
+]],
 } 
 
 function reset()
@@ -71,13 +109,12 @@ function reset()
   cur_state = {
     t = 0,
     robots = {
-      create_robot(2, 2, 1, 14),
-      --create_robot(5, 5, 2, 12),
-      --create_robot(6, 8, 3, 11),
+      create_robot(2, 2, 1, robot_cols[1]),
     },
   }
 
   history = {}
+  actions = {}
 
   target_x = 1
   target_y = 1
@@ -90,11 +127,26 @@ function reset()
   should_gotonext = false
   rewind_t = 0
   rewind_t_max = 6
+
+  draw_scale = 8
+  draw_xoffset = 3
+  draw_yoffset = 3
+  target_draw_scale = 8
+  target_draw_xoffset = 3
+  target_draw_yoffset = 3
+
+  bgsize_x = 10
+  bgsize_y = 10
+
+  turns_left_max = 24
+  turns_left = turns_left_max
+  turns_left_t_max = 240
+  turns_left_t = turns_left_t_max
 end 
 
 function _init()
   reset()
-  load_tile(0, 0, tiles[1])
+  load_tile(0, 0, tiles[1 + flr(rnd(#tiles))])
   local target_robot = 1 -- + flr(rnd(3))
   generate_target(target_robot)
 
@@ -103,14 +155,8 @@ function _init()
 end
 
 function _update60()
-  --if t % 4 == 0 then
-    --print_debug(stat(7))
-  --end
 
-  t += 1
-  if rewind_t > 0 then
-    rewind_t -= 1
-  end
+  tick_vars()
 
   for i,o in pairs(drawables) do
     o.tick(o)
@@ -159,6 +205,8 @@ function _update60()
     if #history > 0 then
       cur_state = history[#history]
       del(history, cur_state)
+      local action = actions[#actions]
+      del(actions, action)
       rewind_t = rewind_t_max
       sfx(4)
     end
@@ -170,10 +218,17 @@ function _update60()
     sfx(3)
   end
 
-  if ndir != none and rewind_t <= 0 then
+  local tt = turns_left - cur_state.t
+  if ndir != none and rewind_t <= 0 and tt > 0 then
     -- setup next move --
 
-    sfx(1)
+    -- alert on low numbers of moves left
+    if tt <= 5 then
+      sfx(6)
+    else
+      sfx(1)
+    end
+
     local old_state = cur_state
     cur_state = move_robot(ndir, selected_rid, cur_state)
 
@@ -210,6 +265,7 @@ function _update60()
 
     -- todo only add to history if states are different
     add(history, old_state)
+    add(actions, {rid = selected_rid, dir = ndir})
 
     -- check goal
     if new_robot.id == target_rid then
@@ -222,19 +278,70 @@ function _update60()
   end
 end
 
+function tick_vars()
+  t += 1
+
+  if rewind_t > 0 then
+    rewind_t -= 1
+  end
+
+  draw_scale = ease_epsilon(draw_scale, target_draw_scale, 10)
+  draw_xoffset = ease_epsilon(draw_xoffset, target_draw_xoffset, 10)
+  draw_yoffset = ease_epsilon(draw_yoffset, target_draw_yoffset, 10)
+
+  if turns_left_t > 0 then
+    turns_left_t -= 1
+  else
+    turns_left_t = turns_left_t_max
+    turns_left -= 1
+
+    local tt = turns_left - cur_state.t
+    if tt <= 0 then
+      _init()
+    elseif tt <= 5 then
+      sfx(6)
+    elseif turns_left < 10 then
+      sfx(5)
+    elseif turns_left < 16 then
+      sfx(7)
+    end
+  end
+end
+
 function next_level()
   sfx(0)
   level += 1
   local unlock = unlock_pattern[level]
   if unlock == unlock_robot then
-      local rx = 2
-      local ry = 2
-      local rid = #cur_state.robots + 1
-      add(cur_state.robots, create_robot(rx, ry, rid, robot_cols[rid]))
+    local rx = flr(rnd(bgsize_x))
+    local ry = flr(rnd(bgsize_y))
+    local rid = #cur_state.robots + 1
+    while not place_free(rx, ry, cur_state) or enclosed_grid(rx, ry) do
+      rx = flr(rnd(bgsize_x))
+      ry = flr(rnd(bgsize_y))
+    end
+    add(cur_state.robots, create_robot(rx, ry, rid, robot_cols[rid]))
+  elseif unlock == unlock_tile then
+    load_tile(9, 0, tiles[1 + flr(rnd(#tiles))])
+    -- remove right side
+    for i,o in pairs(grid) do
+      if o.x == 9 and o.y > 0 and o.y < 9 then
+        del(grid, o)
+      end
+    end
+    target_draw_xoffset = 1
+    target_draw_yoffset = 4
+    bgsize_x = 19
+    target_draw_scale = 6
   end
   local target_robot = 1 + flr(rnd(#cur_state.robots))
   generate_target(target_robot)
   history = {}
+  actions = {}
+  cur_state.t = 0
+
+  turns_left = turns_left_max
+  turns_left_t = turns_left_t_max
 
   shake_t = shake_t_max
 end
@@ -249,6 +356,7 @@ function clone_robot(r)
 end
 
 function load_tile(xoffset, yoffset, tile)
+  print_debug("loading tile at " .. xoffset .. " " .. yoffset)
   local px = 0
   local py = 0
 
@@ -279,7 +387,9 @@ function load_tile(xoffset, yoffset, tile)
       end
 
       if (borders != flags_border_none) then
-        local cell = {x = x - 1, y = y - 1, borders = borders}
+        local xx = x + xoffset - 1
+        local yy = y + yoffset - 1
+        local cell = {x = xx, y = yy, borders = borders}
         add(grid, cell)
       end
     end
@@ -288,7 +398,7 @@ end
 
 function generate_target(target_robot)
   local state = cur_state
-  for i = 0,200 do
+  for i = 0,16 * #cur_state.robots + 2*level do
     local dir = 1 + flr(rnd(4))
     local id = 1 + flr(rnd(#cur_state.robots))
     state = move_robot(dir, id, state)
@@ -309,7 +419,17 @@ function place_free(x, y, state)
   return true
 end
 
-function should_stop(x, y, dir, state)
+function enclosed_grid(x, y)
+  for i,cell in pairs(grid) do
+    if cell.x == x and cell.y == y then
+      return band(cell.borders, flags_border_all) == flags_border_all
+    end
+  end
+
+  return false
+end
+
+function should_stop(x, y, dir)
   for i,cell in pairs(grid) do
     if cell.x == x and cell.y == y then
       if (dir == up and (band(cell.borders, flags_border_top) != 0))
@@ -354,7 +474,7 @@ function move_robot(dir, id, state)
   end
 
   local move_vec = vec_from_dir(dir)
-  while (not should_stop(new_robot.x, new_robot.y, dir, state)) 
+  while (not should_stop(new_robot.x, new_robot.y, dir)) 
     and (place_free(new_robot.x + move_vec.x, new_robot.y + move_vec.y, state)) do
     new_robot.x = new_robot.x + move_vec.x
     new_robot.y = new_robot.y + move_vec.y
@@ -383,9 +503,9 @@ end
 function _draw()
   cls(13)
 
-  local scale = 8
-  local x0 = 3
-  local y0 = 3
+  local scale = draw_scale
+  local x0 = draw_xoffset
+  local y0 = draw_yoffset
 
   if shake_t > 0 then
     shake_t -= 1
@@ -397,12 +517,17 @@ function _draw()
 
   draw_target(x0, y0, scale, cur_state)
 
-  local bgsize = 10
-  for i = 0,10 do
-    local bgcol = 2
-    line((x0 + i) * scale, y0 * scale, (x0 + i) * scale, (y0 + bgsize) * scale, bgcol)
-    line(x0 * scale, (y0 + i) * scale, (x0 + bgsize) * scale, (y0 + i) * scale, bgcol)
+  local bgcol = 2
+  --if (t % 64 < 32) then
+    --fillp(0b0101101001011010.1)
+  --end
+  for i = 0,bgsize_x do
+    line((x0 + i) * scale, y0 * scale, (x0 + i) * scale, (y0 + bgsize_y) * scale, bgcol)
   end
+  for i = 0,bgsize_y do
+    line(x0 * scale, (y0 + i) * scale, (x0 + bgsize_x) * scale, (y0 + i) * scale, bgcol)
+  end
+  fillp()
 
   for i,cell in pairs(grid) do
     draw_cell(x0, y0, scale, cell)
@@ -414,6 +539,14 @@ function _draw()
     o.draw(o, x0, y0, scale)
   end
 
+  for i=1,#actions do
+    local action = actions[i]
+    local s = 15 + action.dir
+    pal(7, robot_cols[action.rid])
+    spr(s, 115, -4 +  8*i)
+    pal()
+  end
+
   if shake_t > 0 then
     dump_noise(shake_t / shake_t_max)
   end
@@ -421,6 +554,18 @@ function _draw()
   if rewind_t > 0 then
     dump_rewind_noise()
   end
+
+  --print(turns_left - cur_state.t, 60, 100, 7)
+  local xx = 60
+  local yy = 110
+  local n = turns_left - cur_state.t
+  while n >= 10 do
+    local displ = n % 10
+    spr(displ, xx, yy)
+    n = n / 10
+    xx -= 8
+  end
+  spr(n, xx, yy)
 end
 
 function draw_robots(xoffset, yoffset, scale, state)
@@ -438,7 +583,19 @@ function draw_robots(xoffset, yoffset, scale, state)
     local y0 = (ry + yoffset + 0.25) * scale
     local x1 = (rx + xoffset + 0.75) * scale
     local y1 = (ry + yoffset + 0.75) * scale
+
+    if selected_rid == r.id then
+      local k = 2
+      local c = 0.5
+      if animating then
+        y0 += k + c
+      else
+        y0 += k * sqr(abs(sin(t / 300), 2)) + c
+      end
+    end
+
     rectfill(x0, y0 - 1, x1, y1, 2)
+
     if selected_rid != r.id then
       fillp(0b0101101001011010.1)
     end
@@ -452,6 +609,7 @@ function draw_target(xoffset, yoffset, scale, cur_state)
   local y0 = (target_y + yoffset + 0.13) * scale
   local x1 = (target_x + xoffset + 0.96) * scale
   local y1 = (target_y + yoffset + 0.96) * scale
+
   rectfill(x0, y0, x1, y1, 7)
 
   -- lookup color of target
@@ -463,8 +621,10 @@ function draw_target(xoffset, yoffset, scale, cur_state)
     end
   end
 
-  fillp(0b0110110110110110.1)
-    rectfill(x0, y0, x1, y1, col)
+  local shift = 2 * (flr(t / 18) % 4)
+  local pat = 0b0110110110110110
+  fillp(flr(lshr(pat,shift)))
+    rectfill(x0, y0, x1, y1, bor(0xd0, col))
   fillp()
 end
 
@@ -526,7 +686,8 @@ end
 -- other --
 
 function create_select_anim(start_rid, end_rid)
-  -- just use cur_state
+  -- ok to use cur_state as we are just creating an animation
+  -- that doesnt effect state
 
   local start = get_robot(start_rid, cur_state)
 
@@ -643,9 +804,42 @@ function get_robot(rid, state)
   print_debug("could not find: " .. rid)
   return nil
 end
+
+epsilon = 0.1
+function ease_epsilon(old, new, k)
+  if (abs(new - old) < epsilon) then
+    return new
+  end
+
+  return (old * (k - 1) + new) / k
+end
+
+function sqr(x) 
+  return x * x
+end
+
+__gfx__
+00777700000070000007700000077700000770000007770000077000007777000007700000777700000000000000000000000000000000000000000000000000
+00700700000770000070070000000700007070000007000000700000000007000070070000700700000000000000000000000000000000000000000000000000
+00700700000070000000070000000700007070000007000000700000000070000070070000700700000000000000000000000000000000000000000000000000
+00700700000070000000700000077700007070000007770000777000000070000007700000777700000000000000000000000000000000000000000000000000
+00700700000070000007700000000700007777000000070000700700000700000070070000000700000000000000000000000000000000000000000000000000
+00700700000070000070000000000700000070000000070000700700000700000070070000000700000000000000000000000000000000000000000000000000
+00700700000070000070000000000700000070000000070000700700007000000070070000000700000000000000000000000000000000000000000000000000
+00777700000777000077770000077700000070000007770000077000007000000007700000000700000000000000000000000000000000000000000000000000
+00000000000000000000700000007000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00700000000007000007770000007000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+07700000000007700077777000007000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+77777777077777770000700000007000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+07700000000007700000700000777770000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00700000000007000000700000077700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000700000007000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __sfx__
 000100000a65009650076500365002650026500265001650223602236021260016500265001650016500165002650016500165001650016500165002650016000000000000000000000000000000000000000000
 000100002a650126500a6500665000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000100001705014150120500f0500c050091500a05008050070500705006650050500405004150040500405000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000300000713010130092301912011220221201a22022030220202201022000251000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000200003c6003d6103c6103c6203d6303d6303d6303d6403d6403d6003d600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+011000002d0502d000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+011000003905000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+011000002105000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
