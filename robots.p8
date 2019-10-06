@@ -2,9 +2,12 @@ pico-8 cartridge // http://www.pico-8.com
 version 16
 __lua__
 
--- an adaptation of the amazing ricochet robots
+-- written for ludum dare 45 "start with nothing"
+-- inspired by the amazing ricochet robots
+--
+-- dan slocombe 2019
 
-debug = true
+debug = false
 
 function print_debug(s)
   if debug then
@@ -148,9 +151,9 @@ function reset()
   bgsize_x = 10
   bgsize_y = 10
 
-  turns_left_max = 18
+  turns_left_max = 16
   turns_left = turns_left_max
-  turns_left_t_max = 300
+  turns_left_t_max = 60
   turns_left_t = turns_left_t_max
 
   tile_count = 1
@@ -171,6 +174,7 @@ function _update60()
   tick_vars()
 
   for i,o in pairs(drawables) do
+    -- pass in "this" object to prevent self references in closures, gc issues
     o.tick(o)
   end
 
@@ -222,7 +226,8 @@ function tick_vars()
     turns_left_t = turns_left_t_max
     turns_left -= 1
 
-    local tt = turns_left - cur_state.t
+    --local tt = turns_left - cur_state.t
+    local tt = turns_left
     if tt <= 0 then
       _init()
     elseif tt <= 5 then
@@ -263,7 +268,8 @@ function update_player()
     sfx(3)
   end
 
-  local tt = turns_left - cur_state.t
+  --local tt = turns_left - cur_state.t
+  local tt = turns_left -- cur_state.t
   if ndir != none and rewind_t <= 0 and tt > 0 then
     -- setup next move --
 
@@ -328,15 +334,17 @@ function next_level()
   level += 1
   local unlock = unlock_pattern[level]
   if unlock == unlock_robot then
+    -- add new robot
     local rx = flr(rnd(bgsize_x))
     local ry = flr(rnd(bgsize_y))
     local rid = #cur_state.robots + 1
-    while not place_free(rx, ry, cur_state) or enclosed_grid(rx, ry) do
+    while place_rid(rx, ry, cur_state) > 0 or enclosed_grid(rx, ry) do
       rx = flr(rnd(bgsize_x))
       ry = flr(rnd(bgsize_y))
     end
     add(cur_state.robots, create_robot(rx, ry, rid, robot_cols[rid]))
   elseif unlock == unlock_tile then
+    -- extend map
     add_tile()
   end
   local target_robot = 1 + flr(rnd(#cur_state.robots))
@@ -354,7 +362,7 @@ end
 function add_tile()
   if tile_count == 1 then
     load_tile(9, 0, tiles[1 + flr(rnd(#tiles))])
-    -- remove right side
+    -- hacky - remove border
     for i,o in pairs(grid) do
       if o.x == 9 and o.y > 0 and o.y < 9 then
         del(grid, o)
@@ -444,26 +452,247 @@ function load_tile(xoffset, yoffset, tile)
 end
 
 function generate_target(target_robot)
-  local state = cur_state
-  for i = 0, 16 * #cur_state.robots + 2*level do
-    local dir = 1 + flr(rnd(4))
-    local id = 1 + flr(rnd(#cur_state.robots))
-    state = move_robot(dir, id, state)
-  end
-
-  target_x = state.robots[target_robot].x
-  target_y = state.robots[target_robot].y
-  target_rid = target_robot
-end
-
-function place_free(x, y, state)
-  for i,o in pairs(state.robots) do
-    if o.x == x and o.y == y then
-      return false
+  local best = generate_target_candidate(target_robot)
+  for i = 0,8 do
+    local c = generate_target_candidate(target_robot)
+    if c.score > best.score then
+      best = c
     end
   end
 
-  return true
+  target_x = best.x
+  target_y = best.y
+  target_rid = best.rid
+end
+
+function pick_robot(target_robot, robot_count)
+  if rnd(1) < 0.75 then
+    return target_robot
+  else
+    return 1 + flr(rnd(robot_count))
+  end
+end
+
+function generate_target_candidate(target_robot)
+  local state = cur_state
+  local robot_count = #cur_state.robots
+  local pointwise_cols = {}
+  local hashes = {}
+  local inputs = {}
+  local gen_history = {}
+  add(gen_history, state)
+  add(hashes, hash_state(state))
+
+  local last_id = -1
+  local last_dir = none
+
+  local movecount = flr(1.5 * sqrt(4 * #cur_state.robots + 2*level)) + 1
+
+  for i = 0, movecount do
+    local col_info = {rid = 0}
+    local id = 0
+    local dir = none
+
+    timeout = 4
+    -- avoid picking something that would create prev position
+    while timeout >= 0 do
+      timeout -= 1
+      id = pick_robot(target_robot, robot_count)
+
+      -- moving idempotent so don't pick same as last time
+      -- also don't invert last move
+      while dir == none or 
+        (id == last_id and (dir == last_dir or dir == invert_dir(last_dir))) do
+        dir = 1 + flr(rnd(4))
+      end
+
+      last_dir = dir
+      last_id = id
+
+      state = move_robot(dir, id, state, col_info)
+
+      local state_eq = true
+      -- ugly code :/
+      for i,s in pairs(gen_history) do
+        local state_eq = true
+        for j = 1,robot_count do
+          local r0 = s.robots[j]
+          local r1 = state.robots[j]
+
+          different = r0.x != r1.x or r0.y != r1.y
+
+          if different then
+            --print_debug("is different")
+            state_eq = false
+            break
+          end
+        end
+
+        if state_eq then
+          --print_debug("state same")
+          break
+        end
+      end
+
+      if not state_eq then
+        break
+      end
+    end
+
+    if col_info.rid > 0 then
+      local rid_min = min(id, col_info.rid)
+      local rid_max = max(id, col_info.rid)
+      local pointwise = get_or_add(
+        pointwise_cols,
+        {rid_min = rid_min, rid_max = rid_max, count = 0},
+        function(x, y) return x.rid_min == y.rid_min and x.rid_max == y.rid_max end)
+
+      pointwise.count += 1
+    end
+
+    add(inputs, {rid = id, dir = dir})
+    add(hashes, hash_state(state))
+  end
+
+  local tr = get_robot(target_robot, state)
+
+  local final_borders = flags_border_none
+  for i,cell in pairs(grid) do
+    if cell.x == tr.x and cell.y == tr.y then
+      final_borders = bor(final_borders, cell.borders)
+    elseif cell.x == tr.x and cell.y == tr.y - 1 then
+      -- cell above
+      final_borders = bor(final_borders, band(cell.borders, flags_border_bottom))
+    elseif cell.x == tr.x and cell.y == tr.y + 1 then
+      -- cell below
+      final_borders = bor(final_borders, band(cell.borders, flags_border_top))
+    elseif cell.x == tr.x - 1 and cell.y == tr.y then
+      -- cell left
+      final_borders = bor(final_borders, band(cell.borders, flags_border_right))
+    elseif cell.x == tr.x + 1 and cell.y == tr.y then
+      -- cell right
+      final_borders = bor(final_borders, band(cell.borders, flags_border_left))
+    end
+  end
+
+  local pos_deltas = {}
+  for i,r in pairs(state.robots) do
+    local init = get_robot(r.id, cur_state)
+    local delta = {
+      id = r.id,
+      dx = r.x - init.x,
+      dy = r.y - init.y,
+    }
+    add(pos_deltas, delta)
+  end
+
+  local score = score_candidate(
+    pointwise_cols,
+    pos_deltas,
+    final_borders,
+    inputs,
+    hashes,
+    robot_count,
+    target_robot)
+
+  return {
+    x = tr.x,
+    y = tr.y,
+    rid = target_robot,
+    score = score,
+  }
+end
+
+function score_candidate(pointwise_cols, pos_deltas, final_borders, inputs, hashes, robot_count, moving_robot)
+  local from_moves = 0
+  local from_cols = 0
+  local from_borders = 0
+  local from_deltas = 0
+  local from_hashes = 0
+
+  print_debug("\n-- scoring candidate --")
+  print_debug("inputs " .. #inputs)
+
+  per_robot_moves = {}
+  for i = 1,robot_count do
+    per_robot_moves[i] = 0
+  end
+
+  for i,x in pairs(inputs) do
+    print_debug(x.rid .. " " .. tostring_dir(x.dir))
+    per_robot_moves[x.rid] += 1
+  end
+
+  for i = 1,robot_count do
+    local mult = 1
+    if i == moving_robot then
+      mult = 3
+    end
+    from_moves += mult * sqrt(per_robot_moves[i])
+  end
+
+  print_debug("pointwise_cols " .. #pointwise_cols)
+  for i,p in pairs(pointwise_cols) do
+    print_debug(p.rid_min .. " " .. p.rid_max .. " " .. p.count)
+    local mult = 1
+    if p.rid_min == moving_robot or p.rid_max == moving_robot then
+      mult = 3
+    end
+    from_cols += mult * p.count * (sqr(per_robot_moves[p.rid_min] + 1) + sqr(per_robot_moves[p.rid_max] + 1))
+  end
+
+  for i = 0,3 do
+    local b = band(shr(final_borders, i), 0x01)
+    print_debug("i = " .. i .. " borders = " .. b)
+    from_borders += b
+  end
+
+  for i,d in pairs(pos_deltas) do
+    -- maybe manhattan dist
+    local dist2 = sqr(d.dx) + sqr(d.dy)
+    local mult = 1
+    if d.id == moving_robot then
+      mult = 3
+    end
+    from_deltas += mult * dist2 
+  end
+
+  local c_moves = 1
+  local c_cols = 0.2
+  local c_borders = 2
+  local c_deltas = 0.4
+  local c_hashes = 4
+
+  from_moves *= c_moves
+  from_cols *= c_moves
+  from_borders *= c_borders
+  from_deltas *= c_deltas
+  from_hashes *= c_hashes
+
+  print_debug("score from moves " .. from_moves)
+  print_debug("score from cols " .. from_cols)
+  print_debug("score from borders " .. from_borders)
+  print_debug("score from deltas " .. from_deltas)
+  print_debug("score from hashes " .. from_hashes)
+
+  local score = from_moves + from_cols + from_borders + from_deltas + from_hashes
+  print_debug("total score: " .. score)
+
+  return score
+end
+
+function hash_state(state)
+  return 0
+end
+
+function place_rid(x, y, state, colobj)
+  for i,r in pairs(state.robots) do
+    if r.x == x and r.y == y then
+      return r.id
+    end
+  end
+
+  return 0
 end
 
 function enclosed_grid(x, y)
@@ -511,7 +740,7 @@ function should_stop(x, y, dir)
   return false
 end
 
-function move_robot(dir, id, state)
+function move_robot(dir, id, state, col_info)
   local player = state.robots[id]
   for i,r in pairs(state.robots) do
     if r.id == id then
@@ -521,8 +750,19 @@ function move_robot(dir, id, state)
   end
 
   local move_vec = vec_from_dir(dir)
-  while (not should_stop(new_robot.x, new_robot.y, dir)) 
-    and (place_free(new_robot.x + move_vec.x, new_robot.y + move_vec.y, state)) do
+  while true do
+    if should_stop(new_robot.x, new_robot.y, dir) then
+      break
+    end
+
+    local col_rid = place_rid(new_robot.x + move_vec.x, new_robot.y + move_vec.y, state)
+    if col_rid > 0 then
+      if col_info != nil then
+        col_info.rid = col_rid
+      end
+      break
+    end
+
     new_robot.x = new_robot.x + move_vec.x
     new_robot.y = new_robot.y + move_vec.y
   end
@@ -598,6 +838,11 @@ function _draw()
     dump_noise(shake_t / shake_t_max)
   end
 
+  if should_gotonext then
+    dump_noise(1)
+    print("recomputing", 50, 64, 7)
+  end
+
   if rewind_t > 0 then
     dump_rewind_noise()
   end
@@ -605,7 +850,8 @@ function _draw()
   --print(turns_left - cur_state.t, 60, 100, 7)
   local xx = 60
   local yy = 110
-  local n = turns_left - cur_state.t
+  --local n = turns_left - cur_state.t
+  local n = turns_left
   pal(7, 4)
   draw_big_num(n, 60, 10)
   pal(7, 8)
@@ -873,6 +1119,46 @@ end
 
 function sqr(x) 
   return x * x
+end
+
+function get_or_add(t, v, cmp)
+  for i,x in pairs(t) do
+    if cmp(x, v) then
+      return x
+    end
+  end
+
+  add(t, v)
+  return v
+end
+
+  -- could probably do something nicer for below two
+function tostring_dir(d)
+  if d == none then
+    return "none" 
+  elseif d == left then
+    return "left"
+  elseif d == right then
+    return "right"
+  elseif d == up then
+    return "up"
+  elseif d == down then
+    return "down"
+  end
+end
+
+function invert_dir(d)
+  if d == none then
+    return none
+  elseif d == left then
+    return right
+  elseif d == right then
+    return left
+  elseif d == up then
+    return down
+  elseif d == down then
+    return up
+  end
 end
 
 __gfx__
