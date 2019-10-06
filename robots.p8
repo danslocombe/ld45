@@ -7,7 +7,7 @@ __lua__
 --
 -- dan slocombe 2019
 
-debug = true
+debug = false
 
 function print_debug(s)
   if debug then
@@ -40,6 +40,10 @@ robot_cols = {
 }
 
 unlock_pattern = {
+  -- unlock_robot,
+  -- unlock_tile,
+  -- unlock_tile,
+
   unlock_none,
   unlock_robot,
   unlock_none,
@@ -208,6 +212,8 @@ function draw_help()
     target_y = 0
     target_rid = 1
     draw_target(9, 10, 8)
+
+    spr(48, 60, 97)
   else
     print("press (x) to switch robots", 16, 60 - 16, 7)
     local rr = {x = 0, y = 0, id = 1}
@@ -242,7 +248,7 @@ end
 
 function draw_reset()
   cls(13)
-  print("planted " .. level .. " trees", 40, 54, 7)
+  print("planted " .. level .. " flowers", 40, 54, 7)
   print("retry?", 58, 68, 7)
   if flr(t_menu / 30) % 2 == 0 then
     spr(17, 48, 67)
@@ -552,7 +558,7 @@ function add_tile()
 
     target_draw_xoffset = 3
     target_draw_yoffset = 3
-    target_draw_scale = 5
+    target_draw_scale = 5.5
     bgsize_y = 19
 
   elseif tile_count == 3 then
@@ -1067,27 +1073,35 @@ function draw_robot(xoffset, yoffset, scale, r)
     ry = animation_obj.y
   end
 
-  local x0 = (rx + xoffset + 0.25) * scale
-  local y0 = (ry + yoffset + 0.25) * scale
-  local x1 = (rx + xoffset + 0.75) * scale
-  local y1 = (ry + yoffset + 0.75) * scale
+  local ssx = 0.225
+  local ssy = 0.225
 
-  if selected_rid == r.id then
-    local k = 2
-    local c = 0.5
-    if animating then
+  local x0 = (rx + xoffset + ssx) * scale
+  local y0 = (ry + yoffset + ssy) * scale
+  local x1 = (rx + xoffset + 1 - ssx) * scale
+  local y1 = (ry + yoffset + 1 - ssy) * scale
+
+  local k = 2
+  local c = 0.5
+  if selected_rid == r.id and animating then
       y0 += k + c
-    else
-      y0 += k * sqr(abs(sin(t / 300), 2)) + c
-    end
+  else
+    y0 += k * sqr(abs(sin(t / 300), 2)) + c
   end
 
   rectfill(x0, y0 - 1, x1, y1, 2)
 
   if selected_rid != r.id then
     fillp(0b0101101001011010.1)
+    --fillp(0b0100010000100100.1)
   end
   rectfill(x0, y0 - 1, x1, y1 - 1, robot_cols[r.id])
+  if selected_rid != r.id then
+    --local k = 0.125
+    --rectfill(x0 + scale * k, y0 + scale * k, x1 - scale * k, y1 - scale * k, 2)
+    --line(x0, y0 - 1, x1, y1, 2)
+    --line(x0, y1, x1, y0 - 1, 2)
+  end
   fillp()
 end
 
